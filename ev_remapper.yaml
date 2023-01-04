@@ -1,0 +1,29 @@
+mappers:
+- name: test
+  watch: "/dev/input/event6"
+  write: "/dev/input/event5"
+  events:
+  - watch:
+      misc:
+        type: 4
+        code: 4
+        value: 786980
+      key:
+        type: 1
+        code: 158
+      sync:
+        type: 0
+        code: 0
+        value: 0
+    mapto:
+      misc:
+        type: 4
+        code: 4
+        value: 589835
+      key:
+        type: 1
+        code: 314
+      sync:
+        type: 0
+        code: 0
+        value: 0
