@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,20 +12,21 @@ import (
 )
 
 type Event struct {
-	Type  uint16 `yaml:"type"`
-	Code  uint16 `yaml:"code"`
+	Type  uint16 `yaml:"type,omitempty"`
+	Code  uint16 `yaml:"code,omitempty"`
 	Value int32  `yaml:"value,omitempty"`
 }
 
 type Events struct {
-	Misc Event `yaml:"misc"`
-	Key  Event `yaml:"key"`
-	Sync Event `yaml:"sync,omitempty"`
+	Desc string `yaml:"desc,omitempty"`
+	Misc Event  `yaml:"misc"`
+	Key  Event  `yaml:"key"`
+	Sync Event  `yaml:"sync,omitempty"`
 }
 
 type EventMapper struct {
-	Watch Events `yaml:"watch"`
-	Mapto Events `yaml:"mapto"`
+	Watch Events   `yaml:"watch"`
+	Mapto []Events `yaml:"mapto"`
 }
 type Mapper struct {
 	Name   string        `yaml:"name"`
@@ -41,7 +42,7 @@ type Config struct {
 func main() {
 	config, err := loadConfig()
 	if err != nil {
-		return
+		log.Fatal(err)
 	}
 
 	var wg sync.WaitGroup
@@ -53,6 +54,7 @@ func main() {
 		}(mapper)
 	}
 	wg.Wait()
+	log.Println("done")
 }
 
 func loadConfig() (*Config, error) {
@@ -65,18 +67,61 @@ func loadConfig() (*Config, error) {
 	cfgName := strings.Split(name, ".")[0] + ".yaml"
 	cfgPath := filepath.Join(filepath.Dir(ex), cfgName)
 
-	fmt.Printf("cfgPath: %s\n", cfgPath)
+	log.Printf("cfgPath: %s\n", cfgPath)
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Printf("data: %s\n", string(data))
-
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, err
+		log.Fatal(err)
 	}
+
+	// set default value
+	for i, mapper := range config.Mappers {
+		for j, events := range mapper.Events {
+			misc := events.Watch.Misc
+			if misc.Type == 0 {
+				misc.Type = 4
+			}
+			if misc.Code == 0 {
+				misc.Code = 4
+			}
+			key := events.Watch.Key
+			if key.Type == 0 {
+				key.Type = 1
+			}
+			events.Watch.Misc = misc
+			events.Watch.Key = key
+
+			for k, mapto := range events.Mapto {
+				misc := mapto.Misc
+				if misc.Type == 0 {
+					misc.Type = 4
+				}
+				if misc.Code == 0 {
+					misc.Code = 4
+				}
+				key := mapto.Key
+				if key.Type == 0 {
+					key.Type = 1
+				}
+				mapto.Misc = misc
+				mapto.Key = key
+
+				config.Mappers[i].Events[j].Mapto[k] = mapto
+			}
+
+			config.Mappers[i].Events[j] = events
+		}
+	}
+
+	text, err := yaml.Marshal(config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("config: %s\n", string(text))
 
 	return &config, nil
 }
@@ -101,12 +146,12 @@ type WatchEvents struct {
 func watchInputDevice(mapper Mapper) error {
 	watchInputDevice, err := evdev.Open(mapper.Watch)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
 	defer watchInputDevice.File.Close()
 	writeInputDevice, err := evdev.Open(mapper.Write)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
 	defer writeInputDevice.File.Close()
 
@@ -117,9 +162,9 @@ func watchInputDevice(mapper Mapper) error {
 	for {
 		event, err := watchInputDevice.ReadOne()
 		if err != nil {
-			return err
+			log.Fatal(err)
 		}
-		fmt.Println(event)
+		log.Println(event)
 
 		if expect != int(event.Type) {
 			index = INDEX_MSC
@@ -189,22 +234,26 @@ func eventsIsMatch(expected Events, actual WatchEvents) bool {
 	return true
 }
 
-func getNewEvents(mapto Events, actual WatchEvents) WatchEvents {
-	newEvents := actual
+func getNewEvents(mapto []Events, actual WatchEvents) []WatchEvents {
+	newEvents := make([]WatchEvents, len(mapto))
 
-	// misc全部替换
-	newEvents.Misc.Type = mapto.Misc.Type
-	newEvents.Misc.Code = mapto.Misc.Code
-	newEvents.Misc.Value = mapto.Misc.Value
+	for i, m := range mapto {
+		newEvents[i] = actual
 
-	// key不替换value
-	newEvents.Key.Type = mapto.Key.Type
-	newEvents.Key.Code = mapto.Key.Code
+		// misc全部替换
+		newEvents[i].Misc.Type = m.Misc.Type
+		newEvents[i].Misc.Code = m.Misc.Code
+		newEvents[i].Misc.Value = m.Misc.Value
 
-	// sync可不替换
-	// newEvents.Sync.Type = mapto.Sync.Type
-	// newEvents.Sync.Code = mapto.Sync.Code
-	// newEvents.Sync.Value = mapto.Sync.Value
+		// key不替换value
+		newEvents[i].Key.Type = m.Key.Type
+		newEvents[i].Key.Code = m.Key.Code
+
+		// sync可不替换
+		// newEvents[i].Sync.Type = m.Sync.Type
+		// newEvents[i].Sync.Code = m.Sync.Code
+		// newEvents[i].Sync.Value = m.Sync.Value
+	}
 
 	return newEvents
 }
@@ -213,19 +262,19 @@ func processMapper(device *evdev.InputDevice, mapper Mapper, watchEvents WatchEv
 	for _, events := range mapper.Events {
 		if eventsIsMatch(events.Watch, watchEvents) {
 			newEvents := getNewEvents(events.Mapto, watchEvents)
-			fmt.Println("newEvents")
-			fmt.Printf("%+v\n", newEvents)
-			if err := device.WriteOne(&newEvents.Misc); err != nil {
-				fmt.Println(err)
-				return err
-			}
-			if err := device.WriteOne(&newEvents.Key); err != nil {
-				fmt.Println(err)
-				return err
-			}
-			if err := device.WriteOne(&newEvents.Sync); err != nil {
-				fmt.Println(err)
-				return err
+			log.Println("newEvents")
+			log.Printf("%+v\n", newEvents)
+
+			for _, events := range newEvents {
+				if err := device.WriteOne(&events.Misc); err != nil {
+					log.Fatal(err)
+				}
+				if err := device.WriteOne(&events.Key); err != nil {
+					log.Fatal(err)
+				}
+				if err := device.WriteOne(&events.Sync); err != nil {
+					log.Fatal(err)
+				}
 			}
 
 			break

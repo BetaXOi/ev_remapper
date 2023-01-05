@@ -1,29 +1,34 @@
 mappers:
-- name: test
+- name: MY-POWER_LeWGP-201
   watch: "/dev/input/event6"
   write: "/dev/input/event5"
   events:
   - watch:
+      desc: back button
       misc:
-        type: 4
-        code: 4
         value: 786980
       key:
-        type: 1
         code: 158
-      sync:
-        type: 0
-        code: 0
-        value: 0
     mapto:
+    - desc: select button
       misc:
-        type: 4
-        code: 4
         value: 589835
       key:
-        type: 1
         code: 314
-      sync:
-        type: 0
-        code: 0
-        value: 0
+  - watch:
+      desc: power button
+      misc:
+        value: 786480
+      key:
+        code: 116
+    mapto:
+    - desc: select button
+      misc:
+        value: 589835
+      key:
+        code: 314
+    - desc: start button
+      misc:
+        value: 589836
+      key:
+        code: 315
