@@ -1,8 +1,6 @@
 mappers:
 - name: MY-POWER_LeWGP-201
-  watch: "/dev/input/event6"
-  write: "/dev/input/event5"
-  events:
+  rules:
   - watch:
       desc: back button
       misc:
