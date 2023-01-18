@@ -1,5 +1,5 @@
 mappers:
-- name: MY-POWER_LeWGP-201
+- name: MY-POWER LeWGP-201
   rules:
   - watch:
       desc: back button

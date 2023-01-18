@@ -8,6 +8,7 @@
 bin
 testbin/*
 vendor/*
+ev_remapper
 
 # Test binary, build with `go test -c`
 *.test

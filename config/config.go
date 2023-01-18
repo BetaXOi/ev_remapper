@@ -2,13 +2,13 @@ package config
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/deniswernert/udev"
 	"gopkg.in/yaml.v2"
 )
 
@@ -64,6 +64,10 @@ func LoadConfig(file string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+func (m *Mapper) IsTemplate() bool {
+	return m.Name != "" && m.Watch == "" && m.Write == ""
 }
 
 func (c *Config) String() string {
@@ -132,7 +136,7 @@ func getMatchJoysticks(name string) (joysticks []string, err error) {
 				continue
 			}
 
-			if name == strings.ReplaceAll(string(bytes.TrimSpace(data)), " ", "_") {
+			if name == string(bytes.TrimSpace(data)) {
 				joysticks = append(joysticks, fi.Name())
 			}
 		}
@@ -141,39 +145,59 @@ func getMatchJoysticks(name string) (joysticks []string, err error) {
 	return
 }
 
+// 获取eventX列表，例如 [event0, event1]
 func getJoystickInputEventDevice(joystick string) (devices []string, err error) {
-	entry, err := os.ReadDir("/dev/input/by-path")
+	jsXName, err := os.ReadFile(path.Join("/sys/class/input", joystick, "device/name"))
 	if err != nil {
 		return
 	}
+	jsXName = bytes.TrimSpace(jsXName)
+	jsXConsumerControl := append(bytes.TrimSpace(jsXName), []byte(" Consumer Control")...)
+	jsXPhys, err := os.ReadFile(path.Join("/sys/class/input", joystick, "device/phys"))
+	if err != nil {
+		return
+	}
+	jsXPhys = bytes.TrimSpace(jsXPhys)
+	jsXUSB := bytes.Split(jsXPhys, []byte("/"))[0]
 
-	var joystickPath string
+	var jsXEventDevice string
+	var jsXConsumerControlDevice string
+
+	entry, err := os.ReadDir("/sys/class/input")
+	if err != nil {
+		return
+	}
 	for _, fi := range entry {
-		linkTo, err := os.Readlink(path.Join("/dev/input/by-path", fi.Name()))
-		if err != nil {
+		eventX := fi.Name()
+		if !strings.HasPrefix(eventX, "event") {
 			continue
 		}
 
-		if path.Base(linkTo) == joystick {
-			joystickPath = path.Join("/dev/input/by-path", fi.Name())
-			break
+		name, err := os.ReadFile(path.Join("/sys/class/input", eventX, "device/name"))
+		if err != nil {
+			continue
+		}
+		name = bytes.TrimSpace(name)
+		phys, err := os.ReadFile(path.Join("/sys/class/input", eventX, "device/phys"))
+		if err != nil {
+			continue
+		}
+		phys = bytes.TrimSpace(phys)
+		usb := bytes.Split(phys, []byte("/"))[0]
+
+		if bytes.Equal(name, jsXName) && bytes.Equal(phys, jsXPhys) {
+			jsXEventDevice = eventX
+			continue
+		}
+
+		if bytes.Equal(name, jsXConsumerControl) && bytes.Equal(usb, jsXUSB) {
+			jsXConsumerControlDevice = eventX
+			continue
 		}
 	}
 
-	if joystickPath == "" {
-		err = fmt.Errorf("not found")
-		return
-	}
-
-	// pci-0000:02:00.0-usb-0:2.2:1.0-event-joystick -> ../event5
-	// pci-0000:02:00.0-usb-0:2.2:1.0-joystick -> ../js0
-	// pci-0000:02:00.0-usb-0:2.2:1.1-event -> ../event6
-
-	joystickEventPath := strings.ReplaceAll(joystickPath, "-joystick", "-event-joystick")
-	joystickOtherEventPath := strings.ReplaceAll(joystickPath, "0-joystick", "1-event")
-
-	devices = append(devices, joystickOtherEventPath)
-	devices = append(devices, joystickEventPath)
+	devices = append(devices, jsXConsumerControlDevice)
+	devices = append(devices, jsXEventDevice)
 
 	return
 }
@@ -187,7 +211,7 @@ func (c *Config) expandMapper() error {
 			joysticks, err := getMatchJoysticks(mapper.Name)
 			log.Printf("joysticks: %s\n", joysticks)
 			if err != nil {
-				log.Panicln(err)
+				log.Println(err)
 				continue
 			}
 
@@ -195,14 +219,14 @@ func (c *Config) expandMapper() error {
 				devices, err := getJoystickInputEventDevice(joyjoystick)
 				log.Printf("devices: %s\n", devices)
 				if err != nil {
-					log.Panicln(err)
+					log.Println(err)
 					continue
 				}
 
 				mappers = append(mappers, Mapper{
 					Name:  mapper.Name,
-					Watch: devices[0],
-					Write: devices[1],
+					Watch: path.Join("/dev/input", devices[0]),
+					Write: path.Join("/dev/input", devices[1]),
 					Rules: mapper.Rules,
 				})
 			}
@@ -224,4 +248,80 @@ func (c *Config) Setup() error {
 	c.setDefault()
 
 	return nil
+}
+
+// 监听uevent，当发现有新增的jsX input设备后，将设备名写入channel
+func (c *Config) WatchNewJoystick(jsX chan string) (chan bool, error) {
+	monitor, err := udev.NewMonitor()
+	if err != nil {
+		return nil, err
+	}
+	defer monitor.Close()
+
+	closeCh := make(chan bool)
+
+	events := make(chan *udev.UEvent)
+	shutdown := monitor.Monitor(events)
+	for {
+		select {
+		case c := <-closeCh:
+			if c {
+				shutdown <- c
+			}
+		case event := <-events:
+			if event.Action == "add" {
+				devName := path.Base(event.Env["DEVNAME"])
+				subsystem := event.Env["SUBSYSTEM"]
+
+				if strings.HasPrefix(devName, "js") && subsystem == "input" {
+					log.Println("send js to channel")
+					jsX <- devName
+					log.Println("send done")
+				}
+			}
+		}
+	}
+}
+
+// 得到jsX设备的名称
+func getJoystickName(jsX string) (string, error) {
+	path := path.Join("/sys/class/input", jsX, "device/name")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	return string(bytes.TrimSpace(data)), nil
+}
+
+// 为jsX设备生成相应的mapper规则
+func (c *Config) GenerateMapperForJoystick(jsX string) (*Mapper, error) {
+	name, err := getJoystickName(jsX)
+	if err != nil {
+		return nil, err
+	}
+
+	devices, err := getJoystickInputEventDevice(jsX)
+	log.Printf("devices: %s\n", devices)
+	if err != nil {
+		return nil, err
+	}
+
+	mapper := &Mapper{}
+	for _, m := range c.Mappers {
+		if !m.IsTemplate() {
+			continue
+		}
+		if m.Name == name {
+			mapper = &Mapper{
+				Name:  name,
+				Watch: path.Join("/dev/input", devices[0]),
+				Write: path.Join("/dev/input", devices[1]),
+				Rules: m.Rules,
+			}
+			break
+		}
+	}
+
+	return mapper, nil
 }

@@ -44,6 +44,11 @@ func (m *Mapper) String() string {
 	return string(text)
 }
 
+func (m *Mapper) Close() {
+	m.watchInputDevice.File.Close()
+	m.writeInputDevice.File.Close()
+}
+
 func Init(cfgMapper *config.Mapper) (*Mapper, error) {
 	mapper := &Mapper{
 		cfgMapper: cfgMapper,
@@ -123,7 +128,7 @@ func (m *Mapper) WatchButtonEvents() error {
 			}
 			if err := m.WriteButtonEvents(newEvents); err != nil {
 				log.Println(err)
-				continue
+				return err
 			}
 		default:
 			continue

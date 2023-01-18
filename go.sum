@@ -1,5 +1,7 @@
 github.com/BetaXOi/golang-evdev v0.0.0-20230104112912-901f1f6f1a15 h1:M8ar9iI2hPcHrKRhwOUrLDQ3mn6UQ0p5eIUMnfV7Ea8=
 github.com/BetaXOi/golang-evdev v0.0.0-20230104112912-901f1f6f1a15/go.mod h1:Vu8wshui1iTO/Jc2dnCFq4+nBgs2SRQOiVd2PwHPE1I=
+github.com/deniswernert/udev v0.0.0-20170418162847-a12666f7b5a1 h1:Htbvw1SXzSSLHSxmZFMO7FM9+IEwDJfsDfmtBjGbzP4=
+github.com/deniswernert/udev v0.0.0-20170418162847-a12666f7b5a1/go.mod h1:F2ABndSd1vxGohI2r5toC+++cB3sHTyLMvLh18/awOc=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v2 v2.4.0 h1:D8xgwECY7CYvx+Y2n4sBz93Jn9JRvxdiyyo8CTfuKaY=
